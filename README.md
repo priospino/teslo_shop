@@ -16,6 +16,11 @@ docker-compose up -d
 
 6. Levantar: ```yarn start:dev```
 
+7. (Opcional) Poblar la base de datos con datos de ejemplo (seed):
+```
+http://localhost:3000/api/seed
+```
+
 ## 📖 Documentación de la API
 
 ### Productos

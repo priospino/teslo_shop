@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ProductsModule } from './products/products.module';
+import { SeedModule } from './seed/seed.module';
 
 
 @Module({
@@ -18,6 +19,7 @@ import { ProductsModule } from './products/products.module';
       synchronize: true, // Sincroniza automáticamente el esquema de la DB con las entidades (solo recomendable en desarrollo).
     }),
     ProductsModule,
+    SeedModule,
   ],
   
 })

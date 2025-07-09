@@ -7,6 +7,7 @@ import { UpdateProductDto } from './dto/update-product.dto';
 import { QueryProductDto } from './dto/query-product.dto';
 import { Product } from './entities/product.entity';
 import { PaginationResponse } from '../common/interfaces/pagination.interface';
+import { ProductImage } from './entities/product-image.entity';
 
 
 @Injectable()
@@ -19,26 +20,46 @@ export class ProductsService {
     @InjectRepository(Product)
     private readonly productRepository: Repository<Product>,
 
+    @InjectRepository(ProductImage)
+    private readonly productImageRepository: Repository<ProductImage>,
+
   ) {}
 
 
-  async create(createProductDto: CreateProductDto) {
-    try {
-      const product = this.productRepository.create(createProductDto);
-      await this.productRepository.save( product );
-      return product;
-      
-    } catch (error) {
-      this.handleDBExceptions(error);
-    }
+ // Método asíncrono para crear un nuevo producto en la base de datos
+// Método asíncrono para crear un nuevo producto en la base de datos
+async create(createProductDto: CreateProductDto) {
+  try {
+    // Se extraen las imágenes del DTO (por defecto es un array vacío si no vienen)
+    // y se separan del resto de propiedades del producto
+    const { images = [], ...productDetails } = createProductDto;
+
+    // Se crea una instancia del producto con las propiedades del DTO, excluyendo las imágenes
+    // Las imágenes se transforman a entidades utilizando el repositorio de imágenes (asumiendo relación @OneToMany)
+    const product = this.productRepository.create({
+      ...productDetails,
+      images: images.map(image => this.productImageRepository.create({ url: image }))
+    });
+
+    // Se guarda el producto (junto con las imágenes relacionadas) en la base de datos
+    await this.productRepository.save(product);
+
+    // Se retorna el producto guardado, que incluye las relaciones cargadas
+    return product;
+
+  } catch (error) {
+    // En caso de error en base de datos, se maneja mediante un método centralizado
+    this.handleDBExceptions(error);
   }
+}
 
 
-  async findAll(queryDto: QueryProductDto): Promise<PaginationResponse<Product>> {
+  async findAll(queryDto: QueryProductDto): Promise<PaginationResponse<any>> {
     const { limit = 10, offset = 0, search, gender, size } = queryDto;
 
-    // 1. Crear query builder base
-    const queryBuilder = this.productRepository.createQueryBuilder('product');
+    // 1. Crear query builder base con relaciones
+    const queryBuilder = this.productRepository.createQueryBuilder('product')
+      .leftJoinAndSelect('product.images', 'images');
 
     // 2. Filtro por texto (título o descripción), con búsqueda insensible a mayúsculas
     if (search) {
@@ -76,7 +97,10 @@ export class ProductsService {
 
     // 8. Devolver respuesta paginada con metadatos
     return {
-      data: products,
+      data: products.map(product => ({
+        ...product,
+        images: product.images?.map(img => img.url) || []
+      })),
       total,
       limit,
       offset,
@@ -103,15 +127,17 @@ export class ProductsService {
 
     // Verificar si el término es un UUID válido
     if (isUUID(term)) {
-      // Buscar por ID
-      product = await this.productRepository.findOneBy({ id: term });
+      // Buscar por ID con relaciones
+      product = await this.productRepository.findOne({
+        where: { id: term },
+        relations: ['images']
+      });
     } else {
-      const queryBuilder = this.productRepository.createQueryBuilder(); 
-      product = await queryBuilder
-        .where('UPPER(title) =:title or slug =:slug', {
-          title: term.toUpperCase(),
-          slug: term.toLowerCase(),
-        }).getOne();
+      // Buscar por slug con relaciones
+      product = await this.productRepository.findOne({
+        where: { slug: term },
+        relations: ['images']
+      });
     }
 
     if (!product) {
@@ -125,28 +151,48 @@ export class ProductsService {
 
 
   async update(id: string, updateProductDto: UpdateProductDto): Promise<Product> {
-    // 0. Validar formato de UUID
     if (!isUUID(id)) {
       throw new BadRequestException(`Invalid UUID format for id: ${id}`);
     }
 
-    // 1. Intentar precargar la entidad con el ID y los datos actualizados
-    const product = await this.productRepository.preload({
-      id,
-      ...updateProductDto,
-    });
-
-    // 2. Si no se encuentra el producto, lanzar excepción 404
-    if (!product) {
-      throw new NotFoundException(`Product with id: ${id} not found`);
-    }
+    // Iniciar QueryRunner para transacción
+    const queryRunner = this.productRepository.manager.connection.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
     try {
-      // 3. Guardar los cambios (preload + save = update)
-      return await this.productRepository.save(product);
+      // Buscar producto existente con imágenes
+      const existingProduct = await queryRunner.manager.findOne(Product, { where: { id }, relations: ['images'] });
+      if (!existingProduct) {
+        throw new NotFoundException(`Product with id: ${id} not found`);
+      }
+
+      let images = existingProduct.images;
+      if (updateProductDto.images) {
+        // Eliminar imágenes antiguas
+        await queryRunner.manager.delete(ProductImage, { product: { id } });
+        // Asignar nuevas imágenes
+        images = updateProductDto.images.map(url => queryRunner.manager.create(ProductImage, { url }));
+      }
+
+      // Preload con datos actualizados
+      const product = await queryRunner.manager.preload(Product, {
+        id,
+        ...updateProductDto,
+        images
+      });
+      if (!product) {
+        throw new NotFoundException(`Product with id: ${id} not found`);
+      }
+
+      const savedProduct = await queryRunner.manager.save(product);
+      await queryRunner.commitTransaction();
+      return savedProduct;
     } catch (error) {
-      // 4. Manejo centralizado de errores de base de datos
+      await queryRunner.rollbackTransaction();
       this.handleDBExceptions(error);
+    } finally {
+      await queryRunner.release();
     }
   }
 
@@ -162,6 +208,22 @@ export class ProductsService {
 
     // Error no controlado
     throw new InternalServerErrorException('Unexpected database error, check server logs.');
+  }
+  
+
+  async deleteAllProducts() {
+    const query = this.productRepository.createQueryBuilder('product');
+
+    try {
+      return await query
+        .delete()
+        .where({})
+        .execute();
+
+    } catch (error) {
+      this.handleDBExceptions(error);
+    }
+
   }
 
 
