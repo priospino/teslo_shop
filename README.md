@@ -2,6 +2,13 @@
   <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="200" alt="Nest Logo" /></a>
 </p>
 
+## 📖 Pre requisitos
+1. node instalado
+2. npm instalado
+3. yarn instalado
+4. docker desktop instalado
+5. Imagen de postgres descargado
+
 
 # Teslo API
 

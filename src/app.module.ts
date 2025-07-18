@@ -3,6 +3,9 @@ import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ProductsModule } from './products/products.module';
 import { SeedModule } from './seed/seed.module';
+import { FilesModule } from './files/files.module';
+import { ServeStaticModule } from '@nestjs/serve-static';
+import { join } from 'path';
 
 
 @Module({
@@ -18,8 +21,14 @@ import { SeedModule } from './seed/seed.module';
       autoLoadEntities: true, // Carga automáticamente todas las entidades registradas en la aplicación
       synchronize: true, // Sincroniza automáticamente el esquema de la DB con las entidades (solo recomendable en desarrollo).
     }),
+    
+    ServeStaticModule.forRoot({
+      rootPath: join(__dirname,'..','public'), 
+    }),
+
     ProductsModule,
     SeedModule,
+    FilesModule,
   ],
   
 })
